@@ -65,7 +65,7 @@ module Fluent
         chunk.each do |time, record|
           data = @formatter.format(tag, time, record)
 
-          log.debug(
+          log.info(
             "syslog send",
             host: @host,
             port: @port,
