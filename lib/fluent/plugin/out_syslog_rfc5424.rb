@@ -196,7 +196,7 @@ module Fluent
           @transport.to_sym,
           @host,
           @port,
-          socket_options
+          **socket_options
         )
 
         apply_keepalive
