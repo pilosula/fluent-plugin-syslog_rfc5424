@@ -107,7 +107,6 @@ module Fluent
             if result <= 0
               socket = ensure_socket
               IO.select(nil, [socket], nil, @io_timeout) if socket
-              retry
             end
 
             payload_size -= result
