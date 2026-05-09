@@ -6,10 +6,17 @@ class OutSyslogRFC5424Test < Test::Unit::TestCase
     Fluent::Test.setup
     @time = Fluent::EventTime.new(0, 123456)
     @formatted_log = "51 <14>1 1970-01-01T00:00:00.000123+00:00 - - - - - hi"
+    @formatted_log_bytesize = @formatted_log.bytesize
   end
 
   def create_driver(conf = CONFIG)
     Fluent::Test::Driver::Output.new(Fluent::Plugin::OutSyslogRFC5424).configure(conf)
+  end
+
+  def create_socket
+    socket = Object.new
+    stub(socket).closed? { false }
+    socket
   end
 
   def test_configure
@@ -30,12 +37,10 @@ class OutSyslogRFC5424Test < Test::Unit::TestCase
       port 123
     )
 
-    socket = Object.new
-    mock(socket).write_nonblock(@formatted_log)
+    socket = create_socket
+    mock(socket).write_nonblock(@formatted_log) { @formatted_log_bytesize }
     stub(socket).close
 
-    stub(IO).select(nil, [socket], nil, 1) { ["not an error"] }
-    
     any_instance_of(Fluent::Plugin::OutSyslogRFC5424) do |fluent_plugin|
       mock(fluent_plugin).socket_create(:tls, "example.com", 123, {:insecure=>false, :verify_fqdn=>true, :cert_paths=>nil}).returns(socket)
     end
@@ -50,25 +55,23 @@ class OutSyslogRFC5424Test < Test::Unit::TestCase
       @type syslog_rfc5424
       host example.com
       port 123
+      retry_interval 0
     )
 
-    bad_socket = Object.new
-    mock(bad_socket).write_nonblock(@formatted_log)
+    bad_socket = create_socket
+    mock(bad_socket).write_nonblock(@formatted_log) { raise Errno::EPIPE }
     stub(bad_socket).close
-    
-    good_socket = Object.new
-    mock(good_socket).write_nonblock(@formatted_log)
-    stub(good_socket).close
 
-    mock(IO).select(nil, [bad_socket], nil, 1)
-    mock(IO).select(nil, [good_socket], nil, 1) { ["not an error"] }
+    good_socket = create_socket
+    mock(good_socket).write_nonblock(@formatted_log) { @formatted_log_bytesize }
+    stub(good_socket).close
 
     any_instance_of(Fluent::Plugin::OutSyslogRFC5424) do |fluent_plugin|
       mock(fluent_plugin).socket_create(:tls, "example.com", 123, {:insecure=>false, :verify_fqdn=>true, :cert_paths=>nil}).returns(bad_socket)
       mock(fluent_plugin).socket_create(:tls, "example.com", 123, {:insecure=>false, :verify_fqdn=>true, :cert_paths=>nil}).returns(good_socket)
     end
 
-    output_driver.run(shutdown: false, force_flush_retry: true) do
+    output_driver.run do
       output_driver.feed("tag", @time, {"log" => "hi"})
     end
   end
@@ -81,11 +84,9 @@ class OutSyslogRFC5424Test < Test::Unit::TestCase
       transport tcp
     )
 
-    socket = Object.new
-    mock(socket).write_nonblock(@formatted_log)
+    socket = create_socket
+    mock(socket).write_nonblock(@formatted_log) { @formatted_log_bytesize }
     stub(socket).close
-
-    stub(IO).select(nil, [socket], nil, 1) { ["not an error"] }
 
     any_instance_of(Fluent::Plugin::OutSyslogRFC5424) do |fluent_plugin|
       mock(fluent_plugin).socket_create(:tcp, "example.com", 123, {}).returns(socket)
@@ -105,11 +106,9 @@ class OutSyslogRFC5424Test < Test::Unit::TestCase
       insecure true
     )
 
-    socket = Object.new
-    mock(socket).write_nonblock(@formatted_log)
+    socket = create_socket
+    mock(socket).write_nonblock(@formatted_log) { @formatted_log_bytesize }
     stub(socket).close
-
-    stub(IO).select(nil, [socket], nil, 1) { ["not an error"] }
 
     any_instance_of(Fluent::Plugin::OutSyslogRFC5424) do |fluent_plugin|
       mock(fluent_plugin).socket_create(:tls, "example.com", 123, {:insecure=>true, :verify_fqdn=>false, :cert_paths=>nil}).returns(socket)
@@ -129,11 +128,9 @@ class OutSyslogRFC5424Test < Test::Unit::TestCase
       trusted_ca_path supertrustworthy
     )
 
-    socket = Object.new
-    mock(socket).write_nonblock(@formatted_log)
+    socket = create_socket
+    mock(socket).write_nonblock(@formatted_log) { @formatted_log_bytesize }
     stub(socket).close
-
-    stub(IO).select(nil, [socket], nil, 1) { ["not an error"] }
 
     any_instance_of(Fluent::Plugin::OutSyslogRFC5424) do |fluent_plugin|
       mock(fluent_plugin).socket_create(:tls, "example.com", 123, {:insecure=>false, :verify_fqdn=>true, :cert_paths=>"supertrustworthy"}).returns(socket)
@@ -151,18 +148,17 @@ class OutSyslogRFC5424Test < Test::Unit::TestCase
       port 123
     )
 
-    socket = Object.new
-    stub(socket).write_nonblock(@formatted_log)
+    socket = create_socket
+    stub(socket).write_nonblock(@formatted_log) { @formatted_log_bytesize }
     mock(socket).close
-
-    stub(IO).select(nil, [socket], nil, 1) { ["not an error"] }
 
     any_instance_of(Fluent::Plugin::OutSyslogRFC5424) do |fluent_plugin|
       mock(fluent_plugin).socket_create(:tls, "example.com", 123, {:insecure=>false, :verify_fqdn=>true, :cert_paths=>nil}).returns(socket)
     end
 
     output_driver.run do
-      output_driver.feed("tag", @time , {"log" => "hi"})
+      output_driver.feed("tag", @time, {"log" => "hi"})
     end
   end
+
 end

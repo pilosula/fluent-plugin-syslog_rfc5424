@@ -12,6 +12,7 @@ module Fluent
       config_param :message_id_field, :string, default: "message_id"
       config_param :structured_data_field, :string, default: "structured_data"
       config_param :log_field, :string, default: "log"
+      config_param :timezone, :string, default: "+08:00"
 
       def configure(conf)
         super
@@ -34,7 +35,8 @@ module Fluent
           app_name: record.dig(*@app_name_field_array) || "-",
           proc_id: record.dig(*@proc_id_field_array) || "-",
           msg_id: record.dig(*@message_id_field_array) || "-",
-          sd: record.dig(*@structured_data_field_array) || "-"
+          sd: record.dig(*@structured_data_field_array) || "-",
+          timezone: @timezone
         )
 
         log.debug("RFC 5424 Message")

@@ -14,10 +14,21 @@ class RFC5424::FormatterTest < Test::Unit::TestCase
     assert_equal log, "<14>1 1970-01-01T00:00:00.000000+00:00 - - - - - test-log"
   end
 
+  def test_with_timestamp_utc_plus_8
+    log = RFC5424::Formatter.format(timestamp: 0, timezone: "+08:00", log: "test-log")
+    assert_equal log, "<14>1 1970-01-01T08:00:00.000000+08:00 - - - - - test-log"
+  end
+
   def test_with_timestamp_nano
     log = RFC5424::Formatter.format(timestamp: Fluent::EventTime.new(0, 123456000), log: "test-log")
 
     assert_equal log, "<14>1 1970-01-01T00:00:00.123456+00:00 - - - - - test-log"
+  end
+
+  def test_with_timestamp_nano_utc_plus_8
+    log = RFC5424::Formatter.format(timestamp: Fluent::EventTime.new(0, 123456000), timezone: "+08:00", log: "test-log")
+
+    assert_equal log, "<14>1 1970-01-01T08:00:00.123456+08:00 - - - - - test-log"
   end
 
   def test_with_priority
