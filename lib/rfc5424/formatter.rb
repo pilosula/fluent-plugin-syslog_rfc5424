@@ -5,6 +5,18 @@ module RFC5424
     Format = "<%d>1 %s %s %s %s %s %s %s"
 
     class << self
+      def parse_timezone(tz_str)
+        return 0 unless tz_str
+        if tz_str =~ /^([+-])(\d{2}):(\d{2})$/
+          sign = $1 == '+' ? 1 : -1
+          hours = $2.to_i
+          minutes = $3.to_i
+          sign * (hours * 3600 + minutes * 60)
+        else
+          0
+        end
+      end
+
       def format(
         priority: 14,
         timestamp: nil,
@@ -13,16 +25,23 @@ module RFC5424
         app_name: "-",
         proc_id: "-",
         msg_id: "-",
-        sd: "-"
+        sd: "-",
+        timezone: nil
       )
-        Format % [priority, format_time(timestamp), hostname[0..254], app_name[0..47], proc_id[0..127], msg_id[0..31], sd, log]
+        Format % [priority, format_time(timestamp, timezone), hostname[0..254], app_name[0..47], proc_id[0..127], msg_id[0..31], sd, log]
       end
 
-      def format_time(timestamp)
+      def format_time(timestamp, timezone = nil)
         return "-" if timestamp.nil?
-        return Time.at(timestamp.to_r).utc.to_datetime.rfc3339(6) if timestamp.is_a?(Fluent::EventTime)
-
-        DateTime.strptime(timestamp.to_s, '%s').rfc3339(6)
+        offset = parse_timezone(timezone)
+        if timestamp.is_a?(Fluent::EventTime)
+          time = Time.at(timestamp.to_r + offset).utc
+          time.strftime('%FT%T.%6N') + (timezone || '+00:00')
+        else
+          dt = DateTime.strptime(timestamp.to_s, '%s')
+          time = dt.to_time + offset
+          time.utc.strftime('%FT%T.%6N') + (timezone || '+00:00')
+        end
       end
     end
   end
