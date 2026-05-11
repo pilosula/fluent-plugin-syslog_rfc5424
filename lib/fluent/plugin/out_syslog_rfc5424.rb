@@ -13,10 +13,6 @@ module Fluent
 
       class SyslogWriteTimeout < StandardError; end
 
-      ##########################################################
-      # config
-      ##########################################################
-
       config_param :host, :string
       config_param :port, :integer
 
@@ -84,10 +80,6 @@ module Fluent
         close_socket
       end
 
-      ##########################################################
-      # write
-      ##########################################################
-
       # Connection semantics:
       #   persistent_connection=true  → one socket reused across chunks until reconnect_interval
       #   persistent_connection=false → new socket per chunk, closed in ensure
@@ -103,7 +95,8 @@ module Fluent
               host: @host,
               port: @port,
               transport: @transport,
-              bytes: data.bytesize
+              bytes: data.bytesize,
+              payload: data
             )
 
             send_msg(data)
@@ -112,10 +105,6 @@ module Fluent
           close_socket unless @persistent_connection
         end
       end
-
-      ##########################################################
-      # send
-      ##########################################################
 
       private
 
@@ -218,10 +207,6 @@ module Fluent
         end
       end
 
-      ##########################################################
-      # udp
-      ##########################################################
-
       def send_udp(data)
         # UDP is connectionless; create ephemeral socket
         socket = socket_create(:udp, @host, @port, connect: true)
@@ -239,10 +224,6 @@ module Fluent
         )
         raise
       end
-
-      ##########################################################
-      # socket
-      ##########################################################
 
       def ensure_socket
         @mutex.synchronize do
@@ -296,10 +277,6 @@ module Fluent
         end
       end
 
-      ##########################################################
-      # reconnect
-      ##########################################################
-
       def should_reconnect?
         return false unless @socket
         return false unless @reconnect_interval > 0
@@ -316,10 +293,6 @@ module Fluent
         close_socket_unlocked
       end
 
-      ##########################################################
-      # socket health
-      ##########################################################
-
       def socket_alive?(socket)
         return false unless socket
         return false if socket.closed?
@@ -331,10 +304,6 @@ module Fluent
           false
         end
       end
-
-      ##########################################################
-      # keepalive
-      ##########################################################
 
       def apply_keepalive
         return unless @keep_alive_enabled
@@ -404,10 +373,6 @@ module Fluent
           error_class: e.class
         )
       end
-
-      ##########################################################
-      # close
-      ##########################################################
 
       def close_socket
         socket = nil
