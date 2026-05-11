@@ -28,7 +28,7 @@ module Fluent
 
       # io timeout
       config_param :io_timeout, :integer, default: 5
-      config_param :socket_poll_timeout, :float, default: 0.1
+      config_param :connect_timeout, :integer, default: 5
 
       # retry
       config_param :retry_limit, :integer, default: 3
@@ -39,7 +39,7 @@ module Fluent
       config_param :reconnect_interval, :integer, default: 300
 
       # connection strategy: true=persistent (with reconnect), false=per-chunk
-      config_param :persistent_connection, :bool, default: false
+      config_param :persistent_connection, :bool, default: true
 
       # tcp keepalive
       config_param :keep_alive, :bool, default: true
@@ -88,6 +88,9 @@ module Fluent
       # write
       ##########################################################
 
+      # Connection semantics:
+      #   persistent_connection=true  → one socket reused across chunks until reconnect_interval
+      #   persistent_connection=false → new socket per chunk, closed in ensure
       def write(chunk)
         tag = chunk.metadata.tag
 
@@ -95,7 +98,7 @@ module Fluent
           chunk.each do |time, record|
             data = @formatter.format(tag, time, record)
 
-            log.debug(
+            log.info(
               "syslog send",
               host: @host,
               port: @port,
@@ -106,8 +109,6 @@ module Fluent
             send_msg(data)
           end
         ensure
-          # Close connection after each chunk to prevent half-open connection issues
-          # unless persistent_connection is explicitly enabled
           close_socket unless @persistent_connection
         end
       end
@@ -123,19 +124,17 @@ module Fluent
 
         retry_count = 0
         retry_interval = @retry_interval.to_f
-
         payload = data.b
 
         begin
-          socket = @mutex.synchronize do
-            reconnect_if_needed
-            ensure_socket
+          @mutex.synchronize do
+            # Reconnect if interval elapsed
+            reconnect_socket if @persistent_connection && should_reconnect?
+            # Ensure socket exists and is alive
+            socket = socket_for_send
+            # Write payload
+            write_all_locked(socket, payload)
           end
-
-          # Poll socket before writing to detect half-open connections
-          verify_socket_ready(socket)
-
-          write_all(socket, payload)
 
         rescue => e
           if retry_count < @retry_limit
@@ -172,18 +171,31 @@ module Fluent
         end
       end
 
-      def write_all(socket, payload)
+      # write_nonblock returns:
+      #   nil  → EOF (remote closed), raise to trigger close+retry with full payload
+      #   0    → ambiguous (TCP buffer full, TLS renegotiation, etc.), raise to retry
+      #   >0   → bytes written, accumulate and continue
+      def write_all_locked(socket, payload)
         total = 0
+        length = payload.bytesize
 
-        while total < payload.bytesize
+        while total < length
           begin
             written = socket.write_nonblock(payload.byteslice(total..-1))
 
-            if written.nil? || written <= 0
-              raise IOError, "socket write returned invalid length"
+            if written.nil?
+              # remote peer closed connection — raise to trigger retry with full payload
+              raise SyslogWriteTimeout, "remote peer closed connection (wrote #{total}/#{length} bytes)"
+            elsif written == 0
+              # write_nonblock returned 0 without raising.
+              # Ambiguous cause: TCP buffer full (needs writable) or TLS
+              # renegotiation (needs readable). Since the correct wait direction
+              # depends on the underlying transport, raise and let the outer
+              # retry close+reconnect handle it cleanly.
+              raise SyslogWriteTimeout, "write_nonblock returned 0 (wrote #{total}/#{length} bytes)"
+            else
+              total += written
             end
-
-            total += written
 
           rescue IO::WaitWritable,
                  OpenSSL::SSL::SSLErrorWaitWritable
@@ -211,8 +223,13 @@ module Fluent
       ##########################################################
 
       def send_udp(data)
-        socket = ensure_socket
-        socket.write(data)
+        # UDP is connectionless; create ephemeral socket
+        socket = socket_create(:udp, @host, @port, connect: true)
+        begin
+          socket.write(data)
+        ensure
+          socket.close
+        end
 
       rescue => e
         log.warn(
@@ -220,9 +237,6 @@ module Fluent
           error: e.message,
           error_class: e.class
         )
-
-        close_socket
-
         raise
       end
 
@@ -231,9 +245,15 @@ module Fluent
       ##########################################################
 
       def ensure_socket
+        @mutex.synchronize do
+          socket_for_send
+        end
+      end
+
+      def socket_for_send
         return @socket if socket_alive?(@socket)
 
-        close_socket
+        close_socket_unlocked
 
         log.info(
           "creating syslog socket",
@@ -259,19 +279,20 @@ module Fluent
       def socket_options
         case @transport
         when 'udp'
-          {
-            connect: true
-          }
+          { connect: true }
 
         when 'tls'
           {
+            connect_timeout: @connect_timeout,
             insecure: @insecure,
             verify_fqdn: !@insecure,
             cert_paths: @trusted_ca_path
           }
 
-        else
-          {}
+        else # tcp
+          {
+            connect_timeout: @connect_timeout
+          }
         end
       end
 
@@ -279,21 +300,20 @@ module Fluent
       # reconnect
       ##########################################################
 
-      def reconnect_if_needed
-        return unless @socket
-        return unless @reconnect_interval > 0
-
+      def should_reconnect?
+        return false unless @socket
+        return false unless @reconnect_interval > 0
         age = Fluent::Clock.now - @socket_created_at
+        age >= @reconnect_interval
+      end
 
-        if age >= @reconnect_interval
-          log.info(
-            "reconnecting syslog socket",
-            socket_age: age,
-            reconnect_interval: @reconnect_interval
-          )
-
-          close_socket
-        end
+      def reconnect_socket
+        log.info(
+          "reconnecting syslog socket",
+          socket_age: Fluent::Clock.now - @socket_created_at,
+          reconnect_interval: @reconnect_interval
+        )
+        close_socket_unlocked
       end
 
       ##########################################################
@@ -304,50 +324,12 @@ module Fluent
         return false unless socket
         return false if socket.closed?
 
-        raw_socket =
-          if @transport == 'tls'
-            socket.io
-          else
-            socket
-          end
-
-        so_error = raw_socket.getsockopt(
-          Socket::SOL_SOCKET,
-          Socket::SO_ERROR
-        ).int
-
-        so_error == 0
-
-      rescue
-        false
-      end
-
-      def verify_socket_ready(socket)
-        return unless socket
-        return if @transport == 'udp'
-
-        raw_socket =
-          if @transport == 'tls'
-            socket.io
-          else
-            socket
-          end
-
-        # Poll socket for writability before sending
-        # This detects half-open connections that appear connected but can't write
-        ready = IO.select(nil, [socket], nil, @socket_poll_timeout)
-
-        unless ready
-          raise IOError, "socket not ready for writing (possible half-open connection)"
+        # Check for socket errors using getsockopt
+        begin
+          socket.getsockopt(Socket::SOL_SOCKET, Socket::SO_ERROR).int == 0
+        rescue => e
+          false
         end
-
-      rescue => e
-        log.warn(
-          "socket readiness check failed",
-          error: e.message,
-          error_class: e.class
-        )
-        raise
       end
 
       ##########################################################
@@ -428,23 +410,42 @@ module Fluent
       ##########################################################
 
       def close_socket
+        socket = nil
+
         @mutex.synchronize do
-          return unless @socket
+          socket = @socket
+          @socket = nil
+          @socket_created_at = nil
+        end
 
-          begin
-            @socket.close unless @socket.closed?
+        return unless socket
 
-          rescue => e
-            log.warn(
-              "socket close failed",
-              error: e.message,
-              error_class: e.class
-            )
+        begin
+          socket.close unless socket.closed?
+        rescue => e
+          log.warn(
+            "socket close failed",
+            error: e.message,
+            error_class: e.class
+          )
+        end
+      end
 
-          ensure
-            @socket = nil
-            @socket_created_at = nil
-          end
+      def close_socket_unlocked
+        socket = @socket
+        @socket = nil
+        @socket_created_at = nil
+
+        return unless socket
+
+        begin
+          socket.close unless socket.closed?
+        rescue => e
+          log.warn(
+            "socket close failed",
+            error: e.message,
+            error_class: e.class
+          )
         end
       end
     end
