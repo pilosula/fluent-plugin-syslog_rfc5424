@@ -76,6 +76,58 @@ class OutSyslogRFC5424Test < Test::Unit::TestCase
     end
   end
 
+  def test_persistent_connection_reuses_socket_within_chunk
+    output_driver = create_driver %(
+      @type syslog_rfc5424
+      host example.com
+      port 123
+      persistent_connection true
+    )
+
+    socket = create_socket
+    mock(socket).write_nonblock(@formatted_log) { @formatted_log_bytesize }
+    mock(socket).write_nonblock(@formatted_log) { @formatted_log_bytesize }
+    stub(socket).close
+
+    any_instance_of(Fluent::Plugin::OutSyslogRFC5424) do |fluent_plugin|
+      # Only one socket creation for both messages in same chunk
+      mock(fluent_plugin).socket_create(:tls, "example.com", 123, {:insecure=>false, :verify_fqdn=>true, :cert_paths=>nil}).returns(socket).times(1)
+    end
+
+    output_driver.run do
+      output_driver.feed("tag", @time, {"log" => "hi"})
+      output_driver.feed("tag", @time, {"log" => "hi"})
+    end
+  end
+
+  def test_persistent_connection_reconnects_after_interval
+    output_driver = create_driver %(
+      @type syslog_rfc5424
+      host example.com
+      port 123
+      persistent_connection true
+      reconnect_interval 0
+    )
+
+    first_socket = create_socket
+    mock(first_socket).write_nonblock(@formatted_log) { @formatted_log_bytesize }
+    stub(first_socket).close
+
+    second_socket = create_socket
+    mock(second_socket).write_nonblock(@formatted_log) { @formatted_log_bytesize }
+    stub(second_socket).close
+
+    any_instance_of(Fluent::Plugin::OutSyslogRFC5424) do |fluent_plugin|
+      mock(fluent_plugin).socket_create(:tls, "example.com", 123, {:insecure=>false, :verify_fqdn=>true, :cert_paths=>nil}).returns(first_socket)
+      mock(fluent_plugin).socket_create(:tls, "example.com", 123, {:insecure=>false, :verify_fqdn=>true, :cert_paths=>nil}).returns(second_socket)
+    end
+
+    output_driver.run do
+      output_driver.feed("tag", @time, {"log" => "hi"})
+      output_driver.feed("tag", @time, {"log" => "hi"})
+    end
+  end
+
   def test_non_tls
     output_driver = create_driver %(
       @type syslog_rfc5424
@@ -146,6 +198,7 @@ class OutSyslogRFC5424Test < Test::Unit::TestCase
       @type syslog_rfc5424
       host example.com
       port 123
+      persistent_connection false
     )
 
     socket = create_socket
