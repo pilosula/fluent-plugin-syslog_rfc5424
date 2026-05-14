@@ -16,6 +16,7 @@ module Fluent
 
       def configure(conf)
         super
+        @timezone_offset = RFC5424::Formatter.parse_timezone(@timezone)
         @hostname_field_array = @hostname_field.split(".")
         @app_name_field_array = @app_name_field.split(".")
         @proc_id_field_array = @proc_id_field.split(".")
@@ -37,7 +38,7 @@ module Fluent
           proc_id: record.dig(*@proc_id_field_array) || "-",
           msg_id: record.dig(*@message_id_field_array) || "-",
           sd: record.dig(*@structured_data_field_array) || "-",
-          timezone: @timezone
+          timezone_offset: @timezone_offset
         )
 
         log.debug("RFC 5424 Message")

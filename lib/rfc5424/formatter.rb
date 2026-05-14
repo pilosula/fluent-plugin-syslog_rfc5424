@@ -26,32 +26,22 @@ module RFC5424
         proc_id: "-",
         msg_id: "-",
         sd: "-",
-        timezone: nil
+        timezone_offset: 0
       )
-        Format % [priority, format_time(timestamp, timezone), hostname[0..254], app_name[0..47], proc_id[0..127], msg_id[0..31], sd, log]
+        Format % [priority, format_time(timestamp, timezone_offset), truncate(hostname, 255), truncate(app_name, 48), truncate(proc_id, 128), truncate(msg_id, 32), sd, log]
       end
 
-      def format_time(timestamp, timezone = nil)
+      def format_time(timestamp, offset = 0)
         return "-" if timestamp.nil?
-        offset = parse_timezone(timezone)
-        
-        # 统一使用 Time.at 处理所有时间戳
-        # 这样可以避免 DateTime.strptime 对系统时区的依赖
-        if timestamp.is_a?(Fluent::EventTime)
-          ts_value = timestamp.to_r
-        else
-          # 转换为 Rational 以保持精度
-          ts_value = timestamp.to_r
-        end
-        
-        # 计算调整后的时间戳（加上时区偏移）
-        adjusted_ts = ts_value + offset
-        
-        # 转为UTC时间对象
-        time = Time.at(adjusted_ts).utc
-        
-        # 格式化输出
-        time.strftime('%FT%T.%6N') + (timezone || '+00:00')
+
+        time = Time.at(timestamp.to_r).utc.getlocal(offset)
+        time.strftime('%FT%T.%6N%:z')
+      end
+
+      private
+
+      def truncate(str, max)
+        str.length > max ? str[0...max] : str
       end
     end
   end
