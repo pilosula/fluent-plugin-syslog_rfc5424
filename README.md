@@ -59,6 +59,7 @@ Defaults to `syslog_rfc5424`
 | message_id_field          | string  | sets msg id in syslog from field in fluentd, delimited by '.' (default message_id) |
 | structured_data_field     | string  | sets structured data in syslog from field in fluentd, delimited by '.' (default structured_data) |
 | log_field                 | string  | sets log in syslog from field in fluentd, delimited by '.' (default log) |
+| timezone                  | string  | timestamp timezone offset in RFC3339 format (default "+08:00"). Use "+00:00" for UTC, "-05:00" for EST, etc. |
 
 ## Formatter Usage
 
@@ -72,6 +73,32 @@ Defaults to `syslog_rfc5424`
   </format>
 </match>
 ```
+
+### Timezone Configuration
+
+By default, timestamps are formatted using UTC+8 timezone (+08:00). To change the timezone:
+
+```
+<match **>
+  @type syslog_rfc5424
+  host SYSLOG-HOST
+  port SYSLOG-PORT
+  <buffer>
+    @type memory
+    flush_interval 10s
+  </buffer>
+  <format>
+    @type syslog_rfc5424
+    timezone "+00:00"      # UTC timezone
+  </format>
+</match>
+```
+
+**Timezone Format:** Use RFC3339 format `±HH:MM`
+- UTC: `"+00:00"`
+- UTC+8: `"+08:00"`
+- EST (UTC-5): `"-05:00"`
+- IST (UTC+5:30): `"+05:30"`
 
 ## Development
 

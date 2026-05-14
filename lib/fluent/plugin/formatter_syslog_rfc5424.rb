@@ -27,6 +27,7 @@ module Fluent
       def format(tag, time, record)
         log.debug("Record")
         log.debug(record.map { |k, v| "#{k}=#{v}" }.join('&'))
+        log.debug("Formatter config", timezone: @timezone, rfc6587_message_size: @rfc6587_message_size)
 
         msg = RFC5424::Formatter.format(
           log: record.dig(*@log_field_array) || "-",

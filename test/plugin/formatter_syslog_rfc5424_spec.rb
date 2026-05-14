@@ -145,4 +145,34 @@ class FormatterSyslogRFC5424Test < Test::Unit::TestCase
                  formatter_driver.instance.format(tag, time, record)
   end
 
+  def test_format_with_timezone_utc_zero
+    formatter_driver = create_driver %(
+      @type syslog_rfc5424
+      rfc6587_message_size false
+      timezone +00:00
+    )
+    tag = "test-formatter"
+    time = Fluent::EventTime.new(0, 123456000)
+    record = {"log" => "test-log"}
+
+    formatted_message = "<14>1 1970-01-01T00:00:00.123456+00:00 - - - - - test-log\n"
+    assert_equal "#{formatted_message}",
+                 formatter_driver.instance.format(tag, time, record)
+  end
+
+  def test_format_with_timezone_utc_plus_8
+    formatter_driver = create_driver %(
+      @type syslog_rfc5424
+      rfc6587_message_size false
+      timezone +08:00
+    )
+    tag = "test-formatter"
+    time = Fluent::EventTime.new(0, 123456000)
+    record = {"log" => "test-log"}
+
+    formatted_message = "<14>1 1970-01-01T08:00:00.123456+08:00 - - - - - test-log\n"
+    assert_equal "#{formatted_message}",
+                 formatter_driver.instance.format(tag, time, record)
+  end
+
 end

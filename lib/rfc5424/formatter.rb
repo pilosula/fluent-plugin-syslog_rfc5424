@@ -34,14 +34,24 @@ module RFC5424
       def format_time(timestamp, timezone = nil)
         return "-" if timestamp.nil?
         offset = parse_timezone(timezone)
+        
+        # 统一使用 Time.at 处理所有时间戳
+        # 这样可以避免 DateTime.strptime 对系统时区的依赖
         if timestamp.is_a?(Fluent::EventTime)
-          time = Time.at(timestamp.to_r + offset).utc
-          time.strftime('%FT%T.%6N') + (timezone || '+00:00')
+          ts_value = timestamp.to_r
         else
-          dt = DateTime.strptime(timestamp.to_s, '%s')
-          time = dt.to_time + offset
-          time.utc.strftime('%FT%T.%6N') + (timezone || '+00:00')
+          # 转换为 Rational 以保持精度
+          ts_value = timestamp.to_r
         end
+        
+        # 计算调整后的时间戳（加上时区偏移）
+        adjusted_ts = ts_value + offset
+        
+        # 转为UTC时间对象
+        time = Time.at(adjusted_ts).utc
+        
+        # 格式化输出
+        time.strftime('%FT%T.%6N') + (timezone || '+00:00')
       end
     end
   end
